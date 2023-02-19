@@ -1,0 +1,101 @@
+---
+output: html_document
+runtime: shiny
+---
+```{r, error=TRUE}
+library(tidyverse)
+library(jsonlite)
+library(ggplot2)
+library(plotly)
+library(shiny)
+
+nba1 <- fromJSON("https://uofi.box.com/shared/static/grgt4wkiumfjgpug3fsx2vfkipv5rxz1.json")
+nba2 <- fromJSON("https://uofi.box.com/shared/static/af959qr9ewjgain1obkzmagapkmw8wbj.json")
+nba3 <- fromJSON("https://uofi.box.com/shared/static/raqot999l9yo6qz26k13epitft9j2ay4.json")
+nba4 <- fromJSON("https://uofi.box.com/shared/static/gcyl1gya0qkoceg0vpydd26mpwczrs56.json")
+nba42 <- nba4 %>%
+  mutate(PlayerName = str_split(str_replace_all(Player,"\\\\","&"), "\\&", simplify=TRUE)[,1], 
+         PlayerID = str_split(str_replace_all(Player,"\\\\","&"), "\\&", simplify=TRUE)[,2]) %>%
+  select(PlayerID, PlayerName, everything(), -Player)
+nba2020 <- bind_rows(nba42, nba3, nba2, nba1)
+
+nba2020_2 <- nba2020 %>%
+  group_by(PlayerID) %>%
+  mutate(`Games Played`=sum(G)) %>%
+  mutate(`Games Started`=sum(GS),`Minutes Played`=sum(MP),`Field Goals Made per Game`=sum(FG)/`Games Played`,
+         `Field Goals Attempted per Game`=sum(FGA)/`Games Played`, `Field Goal Percentage`=`Field Goals Made per Game`/`Field Goals Attempted per Game`,`3 Pointers Made per Game`=sum(`3P`)/`Games Played`,`3 Pointers Attempted per Game`=sum(`3PA`)/`Games Played`,
+         `2 Pointers Made per Game`=sum(`2P`)/`Games Played`,`2 Pointers Attempted per Game`=sum(`2PA`)/`Games Played`, `Free Throws Made per Game`=sum(FT)/`Games Played`,
+         `Free Throws Attempted per Game`=sum(FTA)/`Games Played`,`Offensive Rebounds per Game`=sum(ORB)/`Games Played`,`Defensive Rebounds per Game`=sum(DRB)/`Games Played`,
+         `Rebounds per Game`=sum(TRB)/`Games Played`,`Assists per Game`=sum(AST)/`Games Played`,`Steals per Game`=sum(STL)/`Games Played`,`Blocks per Game`=sum(BLK)/`Games Played`,`Turnovers per Game`=sum(TOV)/`Games Played`,
+         `Fouls per Game`=sum(PF)/`Games Played`,`Points per Game`=sum(PTS)/`Games Played`) %>%
+  distinct(PlayerID,.keep_all = TRUE) %>%
+  mutate(`Player Index Rating` = (`Points per Game`+`Rebounds per Game`+`Assists per Game`+`Steals per Game`+`Blocks per Game`)-((`Field Goals Attempted per Game`-`Field Goals Made per Game`)+(`Free Throws Made per Game`-`Free Throws Attempted per Game`)+`Turnovers per Game`+`Fouls per Game`)) %>%
+  select(-c(stint))
+
+nba2020_2 <- nba2020_2 %>%
+  select(c(`PlayerID`, `PlayerName`, Pos, Age, Tm, `Player Index Rating`, `Games Played`, `Games Started`, `Minutes Played`, `Field Goals Made per Game`, `Field Goals Attempted per Game`,
+           `Field Goal Percentage`, `3 Pointers Made per Game`, `3 Pointers Attempted per Game`, `2 Pointers Made per Game`, `2 Pointers Attempted per Game`, `Free Throws Made per Game`,
+           `Free Throws Attempted per Game`, `Offensive Rebounds per Game`, `Defensive Rebounds per Game`, `Rebounds per Game`, `Assists per Game`, 
+           `Steals per Game`, `Blocks per Game`, `Turnovers per Game`, `Fouls per Game`, `Points per Game`)) %>%
+  arrange(desc(`Player Index Rating`)) %>%
+  mutate_at(vars(,`Player Index Rating`,`Field Goals Made per Game`, `Field Goals Attempted per Game`,
+                 `Field Goal Percentage`, `3 Pointers Made per Game`, `3 Pointers Attempted per Game`, `2 Pointers Made per Game`, `2 Pointers Attempted per Game`, `Free Throws Made per Game`,
+                 `Free Throws Attempted per Game`, `Offensive Rebounds per Game`, `Defensive Rebounds per Game`, `Rebounds per Game`, `Assists per Game`, 
+                 `Steals per Game`, `Blocks per Game`, `Turnovers per Game`, `Fouls per Game`, `Points per Game`), funs(round(., 2)))
+
+# Shiny App
+ui <- fluidPage(
+  mainPanel(
+    tabsetPanel(
+      tabPanel("Scatterplot", plotlyOutput(outputId = "graph"),
+               hover = hoverOpts("plot_hover"),
+               verbatimTextOutput("hover_info")
+               ,
+               selectInput(inputId ="xdata",
+                           label = "Choose a statistic (x-axis)",
+                           choices = names(nba2020_2)[6:27],
+                           selected = NULL
+               ),
+               selectInput(inputId ="ydata",
+                           label = "Choose a statistic (y-axis)",
+                           choices = names(nba2020_2)[6:27],
+                           selected = NULL
+               ),
+      ),
+      tabPanel("Table", tableOutput("table"),
+               selectInput(inputId ="posdata",
+                           label = "Choose a Position",
+                           choices = nba2020_2$Pos,
+                           selected = NULL,
+                           multiple = TRUE
+               ),
+               selectInput(inputId ="teamdata",
+                           label = "Choose a Team",
+                           choices = nba2020_2$Tm,
+                           selected = NULL,
+                           multiple = TRUE
+               ),
+      )
+    )
+  ),
+  textOutput("result")
+)
+
+server <- function(input, output) {
+  output$graph <- renderPlotly({
+    data <- nba2020_2[, c(input$xdata, input$ydata)]
+    colnames(data) <- c("col1", "col2")
+    g <- ggplot(data,aes(x=col1,y=col2, col = as.factor(nba2020_2$Pos), text=paste("</br> Player:",nba2020_2$PlayerName))) +
+      geom_point() + ggtitle("Scatterplot of Selected Statistics By Position") + 
+      labs(x = input$xdata, y = input$ydata, colour = "Position")
+    ggplotly(g,tooltip = c("text"))
+  })
+  
+  output$table <- renderTable(
+    P <- nba2020_2 %>% 
+      filter(Pos %in% input$posdata, Tm %in% input$teamdata), caption = "Select Team and Position and Ordered by Highest Performance Index Rating"
+  )
+}
+
+shinyApp(ui = ui, server = server)
+```
